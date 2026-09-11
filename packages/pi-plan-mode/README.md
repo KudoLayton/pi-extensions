@@ -142,9 +142,10 @@ It accepts common inspection commands, read-only Git and npm queries, pipelines 
 Case-insensitive `-i` is allowed for inspection commands such as `rg`, `grep`, and `git grep`. Commands where `-i` edits in place, including `sed`, stay blocked.
 It also accepts `hostname` without arguments and local Windows `tasklist` queries using reviewed display, filter, module, and service flags.
 Reviewed Git inspections may place `--no-pager` before the accepted subcommand.
-They may also place one or more complete `-C <path>` pairs before the accepted subcommand only when every path is `.` or the exact current Pi working directory.
-Other targets are rejected so `git -C` cannot introduce executable configuration, hooks, filters, signing programs, or lazy-fetch remotes from another repository.
-It rejects output/input redirects, shell expansion, substitutions, subshells, background jobs, incomplete or directory-changing `-C` pairs, other Git global options, Git config overrides, mutating flags, dependency changes, editors, and unknown commands.
+They may also use complete `-C <path>` pairs within the current Pi working directory or its descendants; relative paths follow the preceding `-C` target, and parent traversal is rejected.
+A single `-c safe.directory=<absolute-path>` is accepted only when it matches the final Git directory; wildcard trust and other configuration overrides remain blocked.
+Path containment is lexical, not filesystem isolation: use trusted workspaces, including nested repositories and symlink or junction targets.
+It rejects output/input redirects, shell expansion, substitutions, subshells, background jobs, incomplete or out-of-scope `-C` pairs, other Git global options and config overrides, mutating flags, dependency changes, editors, and unknown commands.
 
 Limited `powershell` uses a separate fail-closed PowerShell policy, including when an extension overrides the canonical `powershell` tool name.
 It accepts canonical inspection cmdlets such as `Get-ChildItem`, `Get-Content`, `Get-Item`, `Get-Location`, `Resolve-Path`, `Select-String`, `Test-Path`, `Measure-Object`, `Sort-Object`, `Format-List`, `Format-Table`, `Out-String`, and `Write-Output`.
@@ -156,7 +157,7 @@ Use canonical cmdlet names because PowerShell aliases are intentionally outside 
 A rejected parsed command list or pipeline identifies its first blocked command segment; malformed or unsupported shell syntax reports the complete submitted input instead.
 Tests and builds may still write ignored caches or build artifacts and may execute project-defined hooks; enable or invoke them only when the repository is trusted.
 Both limited-shell policies reduce risk but do not provide an OS sandbox or confidentiality boundary.
-A configured `safeSubcommands` match bypasses both policies completely, so use it only when you intend to trust the entire submitted shell command.
+Configured `git` and `gh` queries retain both policies. Other configured command prefixes still trust the entire submitted shell command.
 
 ## 🧭 Planning and implementation
 
@@ -376,8 +377,8 @@ The export destination affects the next export immediately.
 Inactive built-in `grep`, `find`, and `ls` must be [enabled in Pi settings](./docs/settings.md#enable-inactive-built-in-search-tools-in-pi); Plan policy only grants execution permission.
 
 > [!WARNING]
-> `safeSubcommands` is a JSON-only full-command trust override, not a read-only allowlist.
-> A matching prefix bypasses all shell checks, including checks on trailing commands, redirects, and mutations.
+> For `git` and `gh`, `safeSubcommands` enables reviewed queries without bypassing argument or shell checks.
+> Other command prefixes remain full-command trust overrides, including trailing commands, redirects, and mutations.
 > Configure it only for commands and repositories you fully trust.
 
 Saves are ordered within one Pi process, preserve unknown fields, and publish atomically; separate Pi processes can still race.

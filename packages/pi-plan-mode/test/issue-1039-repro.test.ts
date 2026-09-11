@@ -130,13 +130,14 @@ test("issue 1039: denied tools report inactive, unavailable, frozen, and blocked
   });
 });
 
-test("issue 1039: reviewed git -C inspections stay in Pi's working directory", async () => {
+test("issue 1039: reviewed git -C inspections stay within Pi's working directory tree", async () => {
   const workingDirectory = process.cwd();
   const quotedWorkingDirectory = `'${workingDirectory}'`;
   for (const command of [
     "git -C . status --short",
     "git --no-pager -C . log -1 --oneline",
     "git -C . -C . diff --check",
+    "git -C packages status --short",
     `git -C ${quotedWorkingDirectory} status --short`,
   ]) {
     assert.equal(isSafeCommand(command, {}, workingDirectory), true, `Bash: ${command}`);
@@ -156,7 +157,7 @@ test("issue 1039: reviewed git -C inspections stay in Pi's working directory", a
   assert.equal(await callTool(fixture, "powershell", { command: "git -C '.' status --short" }), undefined);
 });
 
-test("issue 1039: git -C rejects other repositories and unsafe commands", () => {
+test("issue 1039: git -C rejects out-of-scope directories and unsafe commands", () => {
   const workingDirectory = process.cwd();
   assert.equal(isSafeCommand("git -C . status --short"), false);
   assert.equal(isSafePowerShellCommand("git -C . status --short"), false);
@@ -164,7 +165,6 @@ test("issue 1039: git -C rejects other repositories and unsafe commands", () => 
     "git -C",
     "git -C --no-pager status",
     "git -C /tmp/repository status --short",
-    "git -C packages status --short",
     "git -C packages -C .. status --short",
     "git -C ./packages/.. status --short",
     "git -c core.fsmonitor=false -C . status --short",

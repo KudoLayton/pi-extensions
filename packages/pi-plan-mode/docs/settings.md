@@ -182,7 +182,10 @@ Tree navigation and compaction do not apply pending shortcut changes.
 
 ### Safe shell subcommands
 
-`safeSubcommands` maps any command prefix to subcommand prefixes that the user chooses to trust completely in limited `bash` and `powershell`.
+`safeSubcommands` enables reviewed `git` and `gh` queries in limited `bash` and `powershell`.
+Git accepts the additional queries `rev-parse`, `blame`, `describe`, `merge-base`, `ls-tree`, and `cat-file`; gh accepts `pr view`, `pr list`, `issue view`, and `issue list` with JSON output.
+These commands always retain argument and shell checks: configured entries cannot allow mutation, redirects, explicit helper flags, or unsafe trailing commands.
+Other command prefixes retain the full-command trust override described below.
 For example, `"kubectl": ["get", "apply"]` trusts commands beginning with `kubectl get` or `kubectl apply`, while `"npm": ["run inspect-custom"]` trusts commands beginning with `npm run inspect-custom`.
 Command keys and subcommand entries are trimmed and must be non-empty strings.
 Matches are literal and case-sensitive after leading whitespace in the submitted command is ignored.
@@ -190,9 +193,9 @@ A match requires the complete `<command> <subcommand>` prefix followed by whites
 Duplicate values and command keys that become equal after trimming are merged in first-seen order.
 Omitted `safeSubcommands`, an empty object, and empty arrays preserve the default policy.
 
-When a configured prefix matches, Plan mode permits the complete submitted command without parsing or applying any command, argument, mutation, chain, redirect, expansion, substitution, multiline, or PowerShell syntax checks.
+When a configured prefix other than `git` or `gh` matches, Plan mode permits the complete submitted command without parsing or applying any command, argument, mutation, chain, redirect, expansion, substitution, multiline, or PowerShell syntax checks.
 For example, `"kubectl": ["apply"]` also permits `kubectl apply -f deployment.yaml && rm -rf build`.
-Likewise, `"gh": ["pr view"]` permits `gh pr view 218 --web`, `gh pr view 218 > pr.txt`, and any trailing shell content.
+In contrast, `"gh": ["pr view"]` allows `gh pr view 218 --json number` but rejects `--web`, redirects, and unsafe trailing commands.
 The setting therefore delegates the complete shell decision to the user and can allow arbitrary code execution with Pi's permissions.
 It is not a sandbox, confirmation gate, or read-only guarantee.
 Choose entries that are as specific as your workflow permits, and configure them only for commands and repositories you fully trust.
@@ -202,11 +205,13 @@ That default policy includes Git `status`, `log`, `diff`, `show`, `branch`, `rem
 It rejects output and input redirects, shell expansion and substitution, explicit pager or browser requests, explicit external diff, textconv, filter, or signature helpers, mutating flags, malformed command layouts, and any parsed chain containing an unsafe segment.
 Read-dominant Git validators accept ordinary inspection flags without requiring `--no-textconv` or `--no-ext-diff`; Git may therefore invoke a helper configured by the user or trusted repository even when the command does not request one explicitly.
 Use the negative flags when you want to suppress those configured helpers.
-Mixed read/write surfaces remain narrower: use `git remote show -n` to avoid invoking a transport helper, while mutating `branch` and `remote` forms remain blocked unless explicitly trusted through `safeSubcommands`.
+Mixed read/write surfaces remain narrower: use `git remote show -n` to avoid invoking a transport helper, while mutating `branch` and `remote` forms remain blocked even when listed in `safeSubcommands`.
 
 Read-only does not mean private: Git inspection can expose repository history and tracked secrets, while configured commands can expose or modify any data available to Pi's process.
-A built-in-policy `git -C <path>` inspection is accepted only when the path keeps Git in Pi's current working directory.
-The default policy reduces accidental mutation and cross-repository executable configuration; configured `safeSubcommands` bypass that protection.
+A reviewed `git -C <path>` inspection may target Pi's current working directory or its descendants. Repeated relative targets resolve from the preceding target; parent traversal and targets outside that root are rejected.
+A single `-c safe.directory=<absolute-path>` may match the final Git directory, including when it precedes `-C`; empty, relative, wildcard, duplicate, and unrelated configuration overrides are rejected.
+Containment is lexical and does not resolve symlinks or junctions. Nested repositories and link targets must be trusted because their configuration can execute helpers.
+Use direct Git commands in the PowerShell tool; nested `pwsh -Command` wrappers remain unsupported.
 A non-object `safeSubcommands`, empty command or subcommand string, non-array value, or non-string entry invalidates the entire settings file and triggers the normal warning/default fallback on session start.
 
 ### Thinking level

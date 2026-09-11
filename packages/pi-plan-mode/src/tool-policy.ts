@@ -1,4 +1,4 @@
-import { isAbsolute, normalize } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 
 export const BUILTIN_SAFE_GIT_SUBCOMMANDS = [
@@ -184,6 +184,7 @@ export function isSafePowerShellCommand(
 
 function matchesConfiguredSafeSubcommand(command: string, safeSubcommands: SafeSubcommands) {
   const candidate = command.trimStart();
+  if (/^(git|gh)(?:\s|$)/iu.test(candidate)) return false;
   return Object.entries(safeSubcommands).some(([configuredCommand, subcommands]) =>
     subcommands?.some((subcommand) => {
       const prefix = `${configuredCommand.trim()} ${subcommand.trim()}`;
@@ -649,24 +650,33 @@ function isSafeGitCommand(args: string[], safeSubcommands: SafeSubcommands, work
 
 function parseGitGlobalOptions(args: string[], workingDirectory?: string) {
   let index = 0;
+  let directory = workingDirectory;
+  let safeDirectory: string | undefined;
   while (index < args.length) {
     const argument = args[index];
     if (argument === "--no-pager") {
       index += 1;
       continue;
     }
+    if (argument === "-c") {
+      const setting = args[index + 1];
+      if (safeDirectory !== undefined || !setting?.startsWith("safe.directory=")) return undefined;
+      safeDirectory = setting.slice("safe.directory=".length);
+      if (!isAbsolute(safeDirectory) || /[*?]/u.test(safeDirectory)) return undefined;
+      index += 2;
+      continue;
+    }
     if (argument !== "-C") break;
-    const directory = args[index + 1];
-    if (!directory || !isCurrentWorkingDirectory(directory, workingDirectory)) return undefined;
+    const target = args[index + 1];
+    if (!target || target.startsWith("-") || !directory || !workingDirectory) return undefined;
+    if (target.split(/[\\/]+/u).includes("..")) return undefined;
+    directory = resolve(directory, target);
+    const fromRoot = relative(workingDirectory, directory);
+    if (isAbsolute(fromRoot) || fromRoot === ".." || fromRoot.startsWith(`..${sep}`)) return undefined;
     index += 2;
   }
+  if (safeDirectory !== undefined && (!directory || relative(directory, safeDirectory) !== "")) return undefined;
   return index;
-}
-
-function isCurrentWorkingDirectory(directory: string, workingDirectory?: string) {
-  if (!workingDirectory || directory.split(/[\\/]+/u).includes("..")) return false;
-  if (normalize(directory) === ".") return true;
-  return isAbsolute(directory) && normalize(directory) === normalize(workingDirectory);
 }
 
 function hasSafeGitArguments(subcommand: string, args: string[]) {

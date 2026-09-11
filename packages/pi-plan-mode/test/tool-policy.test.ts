@@ -299,7 +299,7 @@ test("PowerShell diagnostics identify the first rejected segment", () => {
   assert.equal(findBlockedPowerShellCommandSegment("   "), "(empty command)");
 });
 
-test("PowerShell policy fully trusts configured Git and gh subcommands", () => {
+test("PowerShell policy validates configured Git and gh subcommands", () => {
   assert.equal(isSafePowerShellCommand("git rev-parse --show-toplevel"), false);
   assert.equal(isSafePowerShellCommand("git rev-parse --show-toplevel", { git: ["rev-parse"] }), true);
   assert.equal(isSafePowerShellCommand("gh issue view 973 --json number,title"), false);
@@ -308,11 +308,11 @@ test("PowerShell policy fully trusts configured Git and gh subcommands", () => {
     isSafePowerShellCommand("gh issue view 973; Remove-Item -Recurse src", {
       gh: ["issue view"],
     }),
-    true,
+    false,
   );
 });
 
-test("configured Git subcommands are additive, exact, and fully trusted", () => {
+test("configured Git subcommands are additive, exact, and validated", () => {
   const cases = [
     ["rev-parse", "git rev-parse --show-toplevel"],
     ["blame", "git blame --no-textconv -- path/to/file"],
@@ -342,18 +342,18 @@ test("configured Git subcommands are additive, exact, and fully trusted", () => 
     isSafeCommandWithPolicy("git rev-parse --show-toplevel && git blame -- file", {
       git: ["rev-parse"],
     }),
-    true,
+    false,
   );
   assert.equal(
     isSafeCommandWithPolicy("git rev-parse --show-toplevel | touch output", {
       git: ["rev-parse"],
     }),
-    true,
+    false,
   );
   assert.equal(isSafeCommandWithPolicy("git rev-parser --show-toplevel", { git: ["rev-parse"] }), false);
 });
 
-test("configured gh paths are exact and fully trusted", () => {
+test("configured gh paths are exact and validated", () => {
   const cases = [
     ["pr view", "gh pr view 218 --json number,title,state"],
     ["pr list", "gh pr list --limit 20 --json=number,title"],
@@ -386,11 +386,11 @@ test("configured gh paths are exact and fully trusted", () => {
     "gh pr view 218 > output",
     "gh pr view 218 && gh pr merge 218",
   ]) {
-    assert.equal(isSafeCommandWithPolicy(command, allGh), true, command);
+    assert.equal(isSafeCommandWithPolicy(command, allGh), false, command);
   }
 });
 
-test("arbitrary configured Git subcommands become full permissions", () => {
+test("configured Git subcommands do not bypass the inspection policy", () => {
   for (const command of [
     "git cat-file --filters HEAD",
     "git cat-file -p HEAD --output=copy",
@@ -398,12 +398,12 @@ test("arbitrary configured Git subcommands become full permissions", () => {
     "git rev-parse $PI_PLAN_GIT_ARGUMENTS",
     "git rev-parse HEAD && rm -rf build",
   ]) {
-    assert.equal(isSafeCommandWithPolicy(command, { git: ["cat-file", "blame", "rev-parse"] }), true, command);
+    assert.equal(isSafeCommandWithPolicy(command, { git: ["cat-file", "blame", "rev-parse"] }), false, command);
   }
   assert.equal(isSafeCommandWithPolicy("git checkout main"), false);
-  assert.equal(isSafeCommandWithPolicy("git checkout main", { git: ["checkout"] }), true);
+  assert.equal(isSafeCommandWithPolicy("git checkout main", { git: ["checkout"] }), false);
   assert.equal(isSafeCommandWithPolicy("git status > status.txt"), false);
-  assert.equal(isSafeCommandWithPolicy("git status > status.txt", { git: ["status"] }), true);
+  assert.equal(isSafeCommandWithPolicy("git status > status.txt", { git: ["status"] }), false);
 });
 
 test("Git validators allow ordinary inspection while rejecting explicit helpers", () => {
@@ -444,7 +444,7 @@ test("Git validators allow ordinary inspection while rejecting explicit helpers"
     assert.equal(isSafeCommandWithPolicy(command), false, command);
   }
   assert.equal(isSafeCommandWithPolicy("git blame -- path/to/file", { git: ["blame"] }), true);
-  assert.equal(isSafeCommandWithPolicy("git blame --textconv -- path/to/file", { git: ["blame"] }), true);
+  assert.equal(isSafeCommandWithPolicy("git blame --textconv -- path/to/file", { git: ["blame"] }), false);
 });
 
 test("tool policy classifies built-ins and extension tools consistently", () => {
