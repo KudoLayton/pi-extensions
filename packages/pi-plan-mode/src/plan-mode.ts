@@ -66,6 +66,7 @@ import {
   planModeQuestionCancelled,
 } from "./question-tool.js";
 import { assertPlanModeHelperToolsAvailable, planModeHelperToolsAvailable } from "./required-tools.js";
+import { registerReviewPolicy, requestInspectionReview } from "./review-bridge.js";
 import { preflightSavedPlanImplementation, savedPlanBlocksNewWorkflow } from "./saved-plan-preflight.js";
 import {
   awaitPlanModeSettingsWrites,
@@ -106,7 +107,6 @@ import { WorkflowMutex, type WorkflowMutexOwner } from "./workflow-mutex.js";
 const STATE_ENTRY_TYPE = "plan-mode-state";
 const PROPOSED_PLAN_MESSAGE_TYPE = "proposed-plan";
 const RECOVERED_RUNTIME_ADMISSION_INPUT_MESSAGE_TYPE = "plan-mode-recovered-input";
-const BLOCKED_MUTATING_TOOLS = new Set(["edit", "write", "update_plan"]);
 const DEFAULT_TOOLS = ["read", "bash", "edit", "write"];
 interface ReadyPresentationIntent {
   nonce: number;
@@ -177,6 +177,12 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
   const explicitPlanModeSettingsPath = dependencies.settingsPath;
   let state: PlanModeState = { enabled: false, awaitingAction: false };
   let settings: PlanModeSettings = { thinkingLevel: "inherit" };
+  const reviewPolicy = registerReviewPolicy(pi, () => ({
+    session: currentSession,
+    enabled: state.enabled,
+    safeSubcommands: settings.safeSubcommands ?? {},
+    generation: workflowGeneration,
+  }));
   let startupToggleShortcut: ReturnType<typeof configuredPlanModeToggleShortcut>;
   let shortcutInitialized = false;
   let workflowAllowedToolNames: string[] | undefined;
@@ -311,7 +317,10 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
           return;
         }
         if (enterPlanMode(ctx)) {
-          ctx.ui.notify("Plan mode enabled. I will explore and plan, but not modify files.", "info");
+          ctx.ui.notify(
+            "Plan mode enabled. Investigation artifacts require review; existing work must be preserved.",
+            "info",
+          );
         }
         return;
       }
@@ -641,13 +650,11 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
         reason: `Plan mode blocks tool '${event.toolName}' because workflow ownership is unavailable.`,
       };
     }
-    if (BLOCKED_MUTATING_TOOLS.has(event.toolName)) {
+    if (event.toolName === "update_plan") {
       return {
         block: true,
         reason:
-          event.toolName === "update_plan"
-            ? "Plan mode blocks update_plan because it tracks execution progress rather than conversational planning."
-            : `Plan mode blocks mutating tool '${event.toolName}'.`,
+          "Plan mode blocks update_plan because it tracks execution progress rather than conversational planning.",
       };
     }
     if (requiredHelper) return;
@@ -701,23 +708,29 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
           : `Plan mode blocks tool '${event.toolName}' because it is not selected by the Plan policy. Exit Plan mode, then enable it with /plan tools or defaultPlanTools before starting again.`,
       };
     }
-    if (event.toolName === "bash") {
-      const blocked = findBlockedCommandSegment(readCommand(event.input), settings.safeSubcommands, ctx.cwd);
-      if (blocked !== undefined) {
-        return {
-          block: true,
-          reason: `Plan mode blocks bash commands outside its reviewed inspection policy or containing explicitly unsafe arguments.\nBlocked command: ${blocked}`,
-        };
+    if (["bash", "powershell", "write", "edit"].includes(event.toolName)) {
+      const shell = event.toolName === "bash" || event.toolName === "powershell";
+      const blocked = shell
+        ? (event.toolName === "bash" ? findBlockedCommandSegment : findBlockedPowerShellCommandSegment)(
+            readCommand(event.input),
+            settings.safeSubcommands,
+            ctx.cwd,
+          )
+        : "file mutation";
+      // All execution checks, including previously admitted build commands, use the same v2 gate.
+      const generation = workflowGeneration;
+      const result = await requestInspectionReview(pi, event, ctx);
+      if (
+        currentSession !== ctx.sessionManager ||
+        generation !== workflowGeneration ||
+        !state.enabled ||
+        !workflowMutex.isOwner(workflowOwner)
+      ) {
+        return { block: true, reason: "Plan review cancelled because the workflow changed." };
       }
-    }
-    if (event.toolName === "powershell") {
-      const blocked = findBlockedPowerShellCommandSegment(readCommand(event.input), settings.safeSubcommands, ctx.cwd);
-      if (blocked !== undefined) {
-        return {
-          block: true,
-          reason: `Plan mode blocks PowerShell commands outside its reviewed inspection policy or containing explicitly unsafe syntax.\nBlocked command: ${blocked}`,
-        };
-      }
+      if (result.allowed) return;
+      if (blocked === undefined && result.kind === "unavailable") return;
+      return { block: true, reason: `Plan mode: ${result.reason}` };
     }
   });
 
@@ -741,7 +754,20 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
       state.enabled || modeContractsRelevant
         ? reconcileModeContract(result.messages, state.enabled ? "plan" : "normal")
         : result.messages;
-    return { messages: messages as typeof event.messages };
+    const withScratch =
+      state.enabled && reviewPolicy.available()
+        ? [
+            ...messages,
+            {
+              role: "custom" as const,
+              customType: "plan-investigation-space-v2",
+              display: false,
+              content: `Current Plan investigation directory: ${reviewPolicy.scratchRoot()}. Only investigation files here may use write/edit, after automatic review. Existing project work must be preserved.`,
+              timestamp: 0,
+            },
+          ]
+        : messages;
+    return { messages: withScratch as typeof event.messages };
   });
 
   pi.on("input", async (event, ctx) => {
@@ -914,7 +940,10 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
     const wasEnabled = state.enabled;
     if (!enterPlanMode(ctx)) return;
     if (!wasEnabled) {
-      ctx.ui.notify("Plan mode enabled. I will explore and plan, but not modify files.", "info");
+      ctx.ui.notify(
+        "Plan mode enabled. Investigation artifacts require review; existing work must be preserved.",
+        "info",
+      );
     }
     if (sendPlanModeUserMessage(prompt, ctx)) return;
     if (wasEnabled) return;
@@ -1045,7 +1074,10 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
     }
     if (savedPlanBlocksNewWorkflow(ctx, state.savedPlan !== undefined)) return;
     if (enterPlanMode(ctx)) {
-      ctx.ui.notify("Plan mode enabled. I will explore and plan, but not modify files.", "info");
+      ctx.ui.notify(
+        "Plan mode enabled. Investigation artifacts require review; existing work must be preserved.",
+        "info",
+      );
     }
   }
 
@@ -1365,7 +1397,10 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
       start: (signal) => {
         if (signal.aborted || !lifecycle.isCurrent()) return;
         if (enterPlanMode(ctx)) {
-          ctx.ui.notify("Plan mode enabled. I will explore and plan, but not modify files.", "info");
+          ctx.ui.notify(
+            "Plan mode enabled. Investigation artifacts require review; existing work must be preserved.",
+            "info",
+          );
         }
       },
       startWithTools: (names, signal) => {
@@ -1401,7 +1436,10 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
       settings: (signal) => showSettings(ctx, signal, lifecycle.isCurrent),
       startNew: () => {
         if (enterPlanMode(ctx)) {
-          ctx.ui.notify("Plan mode enabled. I will explore and plan, but not modify files.", "info");
+          ctx.ui.notify(
+            "Plan mode enabled. Investigation artifacts require review; existing work must be preserved.",
+            "info",
+          );
         }
       },
       clear: () => {

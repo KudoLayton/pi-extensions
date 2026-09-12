@@ -7,7 +7,7 @@ Use a Codex-like `/plan` mode to explore a codebase, resolve important questions
 ## ✨ Features
 
 - Starts and manages Plan mode through `/plan`, `/plan start`, or `/plan <prompt>`.
-- Blocks mutations, inactive helpers, and unsafe shell forms while keeping helper schemas stable.
+- Protects existing work and blocks inactive helpers and unapproved actions while keeping helper schemas stable.
 - Uses structured questions for important ambiguity and explicit completion for a decision-ready plan.
 - Reviews the complete plan before implementation, export, save, further planning, or discard.
 - Implements in the planning session or a fresh linked session with the approved plan.
@@ -63,7 +63,7 @@ flowchart LR
     review -->|Export| exported["Markdown file"]
 ```
 
-During planning, the agent can inspect the project and ask material questions, but Plan mode blocks editing tools and unsafe shell forms. Implementation starts only after the plan is complete and you choose a handoff:
+During planning, the agent can inspect the project and ask material questions, with investigation writes requiring a compatible reviewer. Implementation starts only after the plan is complete and you choose a handoff:
 
 ```mermaid
 sequenceDiagram
@@ -113,7 +113,7 @@ See [command workflows](./docs/command-workflows.md) for tool selection, busy-st
 
 ## 🔒 Security and privacy
 
-While Plan mode is active, the policy blocks built-in editing tools and instructs the agent not to edit files or implement the change.
+While Plan mode is active, the policy preserves existing project work and forbids implementing the change. The optional v2 reviewer can approve investigation artifacts and scratch files.
 It should explore first and ask structured questions when a preference or tradeoff materially changes the plan.
 Configure persistent defaults or a one-workflow tool override before activation; active and ready workflows lock those controls.
 
@@ -121,7 +121,7 @@ Plan mode registers `plan_mode_question` and `plan_mode_complete` during extensi
 Another active-tool policy may hide them, in which case Plan start or restore fails without widening that policy.
 By default, the Plan policy allows active safe built-ins such as `read`, limited `bash`, limited `powershell`, `grep`, `find`, and `ls`.
 The optional native `powershell` tool must be active when an automatic Plan policy starts, for example through Pi's Windows `defaultTools` setting, unless its name was explicitly retained for first-request resolution.
-Tools named `edit`, `write`, or `update_plan` and deselected tools are blocked at execution time even though active schemas remain visible.
+Tools named `update_plan` and deselected tools are blocked at execution time even though active schemas remain visible. `edit` and `write` require a compatible reviewer and are limited to approved investigation files.
 Tools outside the reviewed core policy—including native MCP tools, native orchestration, extensions, and custom tools—are denied by default; explicitly allow their names before starting only when you accept the risk.
 Server annotations such as `readOnlyHint` are unverified hints, not permission or a safety guarantee.
 For example, opt into `mcp__docs__read`, `firecrawl_scrape`, or `lsp_diagnostics` through `/plan tools` or `defaultPlanTools` before the next workflow.
@@ -138,7 +138,7 @@ A tool admitted before later deactivation can be reactivated and reused in the c
 After they become visible, the Plan-only helpers remain visible in Normal mode, but their handlers and the `tool_call` policy reject calls unless Plan mode owns the active workflow.
 
 Limited `bash` uses a fail-closed Bash policy, including when an extension overrides the canonical `bash` tool name.
-It accepts common inspection commands, read-only Git and npm queries, pipelines and command lists composed entirely of accepted commands, plus selected checks such as `npm test`, `npm run typecheck`, and `cargo test`.
+Without a compatible reviewer, the legacy Bash policy accepts common inspection commands, read-only Git and npm queries, pipelines and command lists composed entirely of accepted commands, plus selected checks such as `npm test`, `npm run typecheck`, and `cargo test`.
 Case-insensitive `-i` is allowed for inspection commands such as `rg`, `grep`, and `git grep`. Commands where `-i` edits in place, including `sed`, stay blocked.
 It also accepts `hostname` without arguments and local Windows `tasklist` queries using reviewed display, filter, module, and service flags.
 Reviewed Git inspections may place `--no-pager` before the accepted subcommand.
@@ -151,7 +151,7 @@ Limited `powershell` uses a separate fail-closed PowerShell policy, including wh
 It accepts canonical inspection cmdlets such as `Get-ChildItem`, `Get-Content`, `Get-Item`, `Get-Location`, `Resolve-Path`, `Select-String`, `Test-Path`, `Measure-Object`, `Sort-Object`, `Format-List`, `Format-Table`, `Out-String`, and `Write-Output`.
 It accepts local `Get-Process` and `Get-Service` queries with reviewed static selectors while rejecting remote and object-input parameters.
 It also accepts the same reviewed `git` and configured `gh` queries as limited Bash, including pipelines and semicolon-delimited command lists composed entirely of accepted commands.
-It rejects redirects, variables, substitutions, script blocks, call operators, type or method expressions, stop-parsing tokens, multiline input, non-ASCII quotation delimiters, aliases, mutating cmdlets, and unknown commands.
+Without a compatible reviewer, the legacy PowerShell policy rejects redirects, variables, substitutions, script blocks, call operators, type or method expressions, stop-parsing tokens, multiline input, non-ASCII quotation delimiters, aliases, mutating cmdlets, and unknown commands.
 Use canonical cmdlet names because PowerShell aliases are intentionally outside the reviewed policy.
 
 A rejected parsed command list or pipeline identifies its first blocked command segment; malformed or unsupported shell syntax reports the complete submitted input instead.
@@ -411,6 +411,10 @@ packages/pi-plan-mode/
 ```
 
 The generated runtime is built from `src/index.ts` and does not import back into `src`.
+
+## 🛡️ Optional automatic permission review (local fork)
+
+The separately installed local `packages/pi-auto-review` package implements the v2 work-preservation review protocol. Known inspection commands keep their fast path; planning checks may write verified generated artifacts and scratch experiments after review. Existing source, configuration, and user work remain protected. Select `write/edit` only for investigation files in the advertised temporary directory. Non-read-only actions require an explicit Plan-compatible assessment. Without a compatible reviewer, the prior strict policy applies. Either loading order is supported without extension imports. See [Auto Review](../pi-auto-review/README.md).
 
 ## 🔎 Keywords
 

@@ -33,7 +33,7 @@ export interface SafeSubcommands {
 export const SAFE_BUILTIN_PLAN_TOOLS = new Set(["read", "bash", "powershell", "grep", "find", "ls"]);
 export type PlanModeToolPolicy = "read-only" | "limited" | "user-opt-in" | "blocked";
 
-const BLOCKED_BUILTIN_TOOLS = new Set(["edit", "write"]);
+const REVIEWED_FILE_TOOLS = new Set(["edit", "write"]);
 const MUTATING_COMMANDS = new Set([
   "rm",
   "rmdir",
@@ -128,7 +128,7 @@ export function isBuiltinTool(tool: ToolInfo) {
 export function classifyPlanModeTool(tool: ToolInfo): PlanModeToolPolicy {
   if (!tool.sourceInfo?.source) return "blocked";
   if (!isBuiltinTool(tool)) return "user-opt-in";
-  if (BLOCKED_BUILTIN_TOOLS.has(tool.name)) return "blocked";
+  if (REVIEWED_FILE_TOOLS.has(tool.name)) return "limited";
   if (tool.name === "bash" || tool.name === "powershell") return "limited";
   return SAFE_BUILTIN_PLAN_TOOLS.has(tool.name) ? "read-only" : "blocked";
 }
@@ -180,6 +180,50 @@ export function isSafePowerShellCommand(
   workingDirectory?: string,
 ) {
   return findBlockedPowerShellCommandSegment(command, safeSubcommands, workingDirectory) === undefined;
+}
+
+export function classifyInspectionCommand(
+  shell: "bash" | "powershell",
+  command: string,
+  safeSubcommands: SafeSubcommands = {},
+  workingDirectory?: string,
+): "allow" | "deny" | "review" {
+  const safe = shell === "powershell" ? isSafePowerShellCommand : isSafeCommand;
+  if (safe(command, safeSubcommands, workingDirectory)) return "allow";
+  const segments = shell === "powershell" ? splitPowerShellSegments(command) : splitShellSegments(command);
+  if (!segments?.length) return "deny";
+  for (const segment of segments) {
+    if (safe(segment, safeSubcommands, workingDirectory)) continue;
+    const words = shell === "powershell" ? powerShellWords(segment) : shellWords(segment);
+    const name = words?.[0]?.toLowerCase();
+    if (!name || hasShellExpansion(segment) || !/^[a-z][a-z0-9-]*$/i.test(name)) return "deny";
+    if (MUTATING_COMMANDS.has(name) || READ_ONLY_COMMANDS.has(name) || READ_ONLY_POWERSHELL_COMMANDS.has(name))
+      return "deny";
+    if (
+      /^(git|gh|hostname|tasklist|get-process|get-service|bash|sh|zsh|cmd|pwsh|powershell|python\d*|node|eval|source|iex|invoke-expression|del|erase|rd|md|ren|move|copy|xcopy|robocopy|reg|icacls|cacls|format|diskpart|ac|clc|cli|clp|cpi|cpp|mi|mp|ni|ri|rni|rnp|si|sp|sc|npm|npx|pnpm|yarn|pip|uv|cargo|dotnet|make)$/.test(
+        name,
+      )
+    )
+      return "deny";
+    if (
+      /^(set|new|remove|clear|add|rename|move|copy|start|stop|restart|install|uninstall|enable|disable|invoke|out|export|save|update|register|unregister)-/.test(
+        name,
+      )
+    )
+      return "deny";
+    if (
+      words?.some(
+        (word) =>
+          word === "--%" ||
+          (word.startsWith("-") &&
+            /^(?:-out(file|variable)|-errorvariable|-warningvariable|-pipelinevariable|--output)(?:[=:]|$)/i.test(
+              word,
+            )),
+      )
+    )
+      return "deny";
+  }
+  return "review";
 }
 
 function matchesConfiguredSafeSubcommand(command: string, safeSubcommands: SafeSubcommands) {

@@ -1,0 +1,34 @@
+{
+  "name": "@narumitw/pi-auto-review",
+  "version": "0.1.0",
+  "description": "Local fork extension for bounded automatic permission review with Plan and Action Fusion integration.",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "docs"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "permissions",
+    "auto-review",
+    "windows"
+  ]
+}

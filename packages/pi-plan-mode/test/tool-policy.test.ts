@@ -17,7 +17,7 @@ test("tool selection allows safe built-ins and non-built-ins only", () => {
   type PlanTool = Parameters<typeof canSelectToolInPlanMode>[0];
   assert.equal(canSelectToolInPlanMode(builtinTool("read") as PlanTool), true);
   assert.equal(canSelectToolInPlanMode(builtinTool("powershell") as PlanTool), true);
-  assert.equal(canSelectToolInPlanMode(builtinTool("edit") as PlanTool), false);
+  assert.equal(canSelectToolInPlanMode(builtinTool("edit") as PlanTool), true);
   assert.equal(canSelectToolInPlanMode(extensionTool("custom") as PlanTool), true);
   assert.equal(canSelectToolInPlanMode(extensionTool("edit") as PlanTool), true);
   assert.deepEqual(withRequiredPlanModeTools(["read", "plan_mode_question", "read"]), [
@@ -452,7 +452,7 @@ test("tool policy classifies built-ins and extension tools consistently", () => 
   assert.equal(classifyPlanModeTool(builtinTool("read") as PlanTool), "read-only");
   assert.equal(classifyPlanModeTool(builtinTool("bash") as PlanTool), "limited");
   assert.equal(classifyPlanModeTool(builtinTool("powershell") as PlanTool), "limited");
-  assert.equal(classifyPlanModeTool(builtinTool("write") as PlanTool), "blocked");
+  assert.equal(classifyPlanModeTool(builtinTool("write") as PlanTool), "limited");
   assert.equal(classifyPlanModeTool(extensionTool("custom") as PlanTool), "user-opt-in");
 });
 
@@ -492,7 +492,8 @@ test("active Plan mode blocks update_plan and blocked built-ins at the tool hook
   assert.equal(allowed, undefined);
   assert.deepEqual(optedInExtension, {
     block: true,
-    reason: "Plan mode blocks mutating tool 'edit'.",
+    reason:
+      "Plan mode blocks tool 'edit' because it is registered but inactive. Activate it before starting the next Plan workflow.",
   });
 
   await mock.events.get("session_shutdown")?.[0]?.({ reason: "reload" }, context.ctx);
