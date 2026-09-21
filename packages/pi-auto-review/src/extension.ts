@@ -7,6 +7,7 @@ import {
   getAgentDir,
   type ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
+import { errorDiagnostic, type ReviewDiagnostic } from "./diagnostics.js";
 import { isOrdinaryWorkspacePath } from "./file-policy.js";
 import { type Assessment, evaluateReview, type ReviewRequest, type Verdict } from "./gate.js";
 import { lockReviewedToolInput } from "./input-lock.js";
@@ -42,6 +43,7 @@ export default function autoReview(pi: ExtensionAPI, dependencies: ExtensionDepe
   let settings: Settings = { ...DEFAULT_SETTINGS };
   let settingsError = false;
   let lastFailureStage: string | undefined;
+  let lastFailure: ReviewDiagnostic | undefined;
   let pending = new WeakMap<object, Promise<Verdict>>();
   let saves: Promise<unknown> = Promise.resolve();
   let dialogs: Promise<unknown> = Promise.resolve();
@@ -144,6 +146,7 @@ export default function autoReview(pi: ExtensionAPI, dependencies: ExtensionDepe
     };
     const started = Date.now();
     let failureStage: string | undefined = settingsError ? "invalid-settings" : undefined;
+    let failureDetail: ReviewDiagnostic | undefined;
     const verdict = await evaluateReview(
       settingsError
         ? { ...request, inspection: policy.inspection === "deny" ? "deny" : "review", ordinaryFile: false }
@@ -185,6 +188,8 @@ export default function autoReview(pi: ExtensionAPI, dependencies: ExtensionDepe
                         ? "invalid-response"
                         : "provider";
               failureStage = lastFailureStage;
+              failureDetail = errorDiagnostic(error, deadline.signal.aborted, signal.aborted);
+              lastFailure = failureDetail;
             }
             throw error;
           } finally {
@@ -227,6 +232,7 @@ export default function autoReview(pi: ExtensionAPI, dependencies: ExtensionDepe
       allowed: verdict.allowed,
       source: verdict.source,
       failureStage,
+      failureDetail,
       durationMs: Date.now() - started,
     });
     return verdict;
@@ -270,7 +276,7 @@ export default function autoReview(pi: ExtensionAPI, dependencies: ExtensionDepe
       if (!ctx.hasUI)
         throw new Error("auto-review requires TUI or RPC UI. See pi-auto-review.json and the package README.");
       if (args.trim() === "status") {
-        ctx.ui.notify(JSON.stringify({ settings, settingsError, lastFailureStage, stats }), "info");
+        ctx.ui.notify(JSON.stringify({ settings, settingsError, lastFailureStage, lastFailure, stats }), "info");
         return;
       }
       if (args.trim() === "help") {
@@ -291,7 +297,7 @@ export default function autoReview(pi: ExtensionAPI, dependencies: ExtensionDepe
       await ui.showMenu(
         ctx,
         () => settings,
-        () => JSON.stringify({ settingsError, stats }),
+        () => JSON.stringify({ settingsError, lastFailureStage, lastFailure, stats }),
         settingsPath(),
         (patch) => {
           const save = saves.then(async () => {

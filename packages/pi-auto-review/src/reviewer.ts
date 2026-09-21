@@ -1,4 +1,5 @@
 import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { ReviewFailure, responseFailure } from "./diagnostics.js";
 import { type Assessment, parseAssessment, type ReviewRequest } from "./gate.js";
 import { collectLocalEvidence } from "./local-evidence.js";
 import { SYSTEM_POLICY } from "./policy.js";
@@ -72,7 +73,15 @@ export async function reviewWithProvider(
   const auth = await abortable(ctx.modelRegistry.getApiKeyAndHeaders(model), signal);
   if (!auth.ok) throw new Error("Reviewer authentication unavailable");
   if (auth.baseUrl) model = { ...model, baseUrl: auth.baseUrl };
-  const stream = provider.streamSimple(
+  // Public registry streaming normalizes systemPrompt into a system message.
+  // Calling the provider directly bypasses that normalization on current Pi.
+  // Keep this structural bridge until the repository's SDK types catch up.
+  const registry = ctx.modelRegistry as typeof ctx.modelRegistry & {
+    streamSimple?: typeof provider.streamSimple;
+  };
+  if (typeof registry.streamSimple !== "function")
+    throw new Error("Reviewer public streaming API unavailable; update Pi.");
+  const stream = registry.streamSimple(
     model,
     {
       systemPrompt: prompt.system,
@@ -88,7 +97,7 @@ export async function reviewWithProvider(
     },
   );
   const response = await abortable(stream.result(), signal);
-  if (response.stopReason !== "stop") throw new Error("Reviewer did not produce a complete decision");
+  if (response.stopReason !== "stop") throw responseFailure(response);
   const text = response.content
     .filter((part) => part.type === "text")
     .map((part) => part.text)
@@ -97,7 +106,11 @@ export async function reviewWithProvider(
   try {
     assessment = parseAssessment(text);
   } catch (error) {
-    throw new Error("Reviewer response invalid", { cause: error });
+    throw new ReviewFailure("Reviewer response invalid", {
+      kind: error instanceof SyntaxError ? "json-parse" : "schema",
+      code: error instanceof SyntaxError ? "invalid-json" : "invalid-assessment",
+      stopReason: response.stopReason,
+    });
   }
   return {
     assessment,
