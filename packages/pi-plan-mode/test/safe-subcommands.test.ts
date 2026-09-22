@@ -44,8 +44,7 @@ test("active Plan mode enforces session-loaded safe subcommands", async () => {
     const compoundCommand = "git status --short && gh pr list --json number && git diff --cached";
     assert.deepEqual(await hook({ toolName: "bash", input: { command: compoundCommand } }, context.ctx), {
       block: true,
-      reason:
-        "Plan mode blocks bash commands outside its reviewed inspection policy or containing explicitly unsafe arguments.\nBlocked command: gh pr list --json number",
+      reason: "Plan mode: A single compatible v2 reviewer is required for this Plan action.",
     });
   });
 });
@@ -85,7 +84,7 @@ test("active Plan mode enforces limited policy for effective bash overrides", as
     const blocked = await hook({ toolName: "bash", input: { command: heredoc } }, context.ctx);
     assert.deepEqual(blocked, {
       block: true,
-      reason: `Plan mode blocks bash commands outside its reviewed inspection policy or containing explicitly unsafe arguments.\nBlocked command: ${heredoc}`,
+      reason: "Plan mode: A single compatible v2 reviewer is required for this Plan action.",
     });
     assert.equal(
       await hook({ toolName: "bash", input: { command: "git rev-parse --show-toplevel" } }, context.ctx),
@@ -133,8 +132,7 @@ test("active Plan mode enforces limited policy for effective PowerShell override
       ),
       {
         block: true,
-        reason:
-          "Plan mode blocks PowerShell commands outside its reviewed inspection policy or containing explicitly unsafe syntax.\nBlocked command: Remove-Item README.md",
+        reason: "Plan mode: A single compatible v2 reviewer is required for this Plan action.",
       },
     );
   });

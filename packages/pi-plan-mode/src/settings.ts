@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
@@ -396,11 +396,18 @@ async function readSettingsSnapshot(settingsPath: string): Promise<SettingsSnaps
 }
 
 async function readSettingsContents(settingsPath: string): Promise<string> {
+  // Windows does not provide O_NOFOLLOW. Inspect the directory entry first so
+  // dangling links cannot masquerade as an absent file and enable legacy fallback.
+  const pathStats = await lstat(settingsPath);
+  if (!pathStats.isFile()) throw new Error("settings path is not a regular file");
   const flags = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0);
   const handle = await open(settingsPath, flags);
   try {
     const stats = await handle.stat();
     if (!stats.isFile()) throw new Error("settings path is not a regular file");
+    if (stats.dev !== pathStats.dev || stats.ino !== pathStats.ino) {
+      throw new Error("settings path changed while opening the file");
+    }
     if (stats.size > MAX_SETTINGS_BYTES) {
       throw new Error(`settings file exceeds ${MAX_SETTINGS_BYTES} bytes`);
     }

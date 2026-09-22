@@ -525,6 +525,15 @@ test("Plan-mode settings read legacy files without modifying them", async () => 
     assert.equal(linked.kind, "invalid");
     assert.match(linked.kind === "invalid" ? linked.reason : "", /regular file/i);
     assert.equal(await readFile(join(directory, "plan-mode.json"), "utf8"), '{"thinkingLevel":"high"}');
+    await assert.rejects(updatePlanModeSettings({ thinkingLevel: "low" }), /regular file/i);
+
+    await unlink(join(directory, "pi-plan-mode.json"));
+    const target = join(directory, "existing-target.json");
+    await writeFile(target, '{"thinkingLevel":"medium"}');
+    await symlink(target, join(directory, "pi-plan-mode.json"));
+    assert.equal((await readPlanModeSettings()).kind, "invalid");
+    await assert.rejects(updatePlanModeSettings({ thinkingLevel: "low" }), /regular file/i);
+    assert.equal(await readFile(target, "utf8"), '{"thinkingLevel":"medium"}');
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;

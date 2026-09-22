@@ -262,7 +262,7 @@ test("Unavailable configured fresh models display a sanitized same-as-plan fallb
   });
 });
 
-test("Default tools distinguish automatic, explicit empty, user risk, blocked rows, and reset", async () => {
+test("Default tools distinguish automatic, explicit empty, user risk, limited rows, and reset", async () => {
   await withSettingsMenu(async ({ settingsPath, tui, ctx, saved }) => {
     const running = showPlanModeSettings(ctx, menuOptions(settingsPath, saved));
     await tui.waitForOpen();
@@ -275,7 +275,7 @@ test("Default tools distinguish automatic, explicit empty, user risk, blocked ro
     assert.match(frame, /user risk/i);
     assert.match(frame, /Use automatic safe built-ins/);
     tui.press("tui.select.down");
-    assert.match(tui.render().join("\n"), /Blocked by Plan-mode policy/i);
+    assert.match(tui.render().join("\n"), /built-in limited/i);
     tui.press("tui.select.up");
 
     // Automatic selects read. Turning it off creates an explicit empty override.
