@@ -63,7 +63,10 @@ test("explicit tool intent is retained until availability is resolved", () => {
     ),
     [LATE_TOOL, "missing", "write"],
   );
-  assert.deepEqual(filterAvailableSelectedToolNames([LATE_TOOL, "missing", "write", LATE_TOOL], tools), [LATE_TOOL]);
+  assert.deepEqual(filterAvailableSelectedToolNames([LATE_TOOL, "missing", "write", LATE_TOOL], tools), [
+    LATE_TOOL,
+    "write",
+  ]);
   assert.deepEqual(
     Array.from(
       snapshotPlanModeSelectedNames(tools, {
@@ -135,7 +138,7 @@ test("configured inactive and metadata-free tools remain denied", async () => {
   assert.equal((await callTool(missingMetadata, LATE_TOOL))?.block, true);
 });
 
-test("configured Plan-blocked built-ins remain denied", async () => {
+test("configured write remains denied without a compatible reviewer", async () => {
   const fixture = await startPlan({
     configured: ["write"],
     activeTools: ["read", "write"],
@@ -145,7 +148,7 @@ test("configured Plan-blocked built-ins remain denied", async () => {
 
   const result = await callTool(fixture, "write");
   assert.equal(result?.block, true);
-  assert.match(result?.reason ?? "", /mutating tool/u);
+  assert.match(result?.reason ?? "", /compatible v2 reviewer/u);
 });
 
 test("registration after first context waits for the next workflow", async () => {
