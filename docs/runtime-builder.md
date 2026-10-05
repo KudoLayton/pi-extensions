@@ -2,6 +2,8 @@
 
 `scripts/runtime-builder.mjs` owns repository build policy; package wrappers own entrypoints, banners, temporary-directory prefixes, eager boundaries, and focused validators. It is not a published runtime dependency. Generated packages continue to load without this repository tooling.
 
+Package imports remain external by default. A package-specific wrapper can opt into bundling an explicitly reviewed helper through `plugins` and `allowedBundledPackages`; unlisted `node_modules` inputs remain rejected. Plan mode uses this exception for `@narumitw/pi-tui-kit` so native JavaScript lazy imports cannot escape Pi's Jiti host aliases. Pi host APIs remain external, and all generated lazy chunks retain `.ts` paths. This runtime behavior change has a Plan-only changeset and a generated-questionnaire loader regression test.
+
 The root manifest declares the shared builder's exact `esbuild` devDependency and the lockfile records it at the root. Workspace declarations alone are insufficient: Node resolves the root module's imports from `scripts/`, so builds and prepack must not depend on npm hoisting workspace dependencies.
 
 ## Scope and verification

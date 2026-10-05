@@ -21,6 +21,19 @@ export const { buildRuntime, validateEagerGraph, validateGeneratedFiles, publish
     "src/settings-menu.ts",
   ],
   forbiddenEagerExternals: ["@narumitw/pi-tui-kit"],
+  allowedBundledPackages: ["@narumitw/pi-tui-kit"],
+  plugins: [
+    {
+      name: "bundle-plan-ui-through-jiti",
+      setup(build) {
+        // Native JS lazy imports can escape Jiti's host API aliases. Bundle the
+        // UI kit into TS chunks while leaving Pi APIs and other packages external.
+        build.onResolve({ filter: /^@narumitw\/pi-tui-kit$/ }, () => ({
+          path: fileURLToPath(import.meta.resolve("@narumitw/pi-tui-kit")),
+        }));
+      },
+    },
+  ],
 });
 
 const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : undefined;
