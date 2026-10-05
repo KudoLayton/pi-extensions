@@ -12,6 +12,8 @@ export function createRuntimeBuilder({
   forbiddenEagerInputs = [],
   forbiddenEagerExternals = [],
   allowedEagerExternals = [],
+  allowedBundledPackages = [],
+  plugins = [],
   matchExternalSubpaths = true,
   includeDynamicExternals = false,
   validateGraph,
@@ -41,7 +43,12 @@ export function createRuntimeBuilder({
       for (const input of Object.keys(output.inputs ?? {})) {
         const normalized = normalizePath(input);
         allInputs.add(normalized);
-        if (normalized.includes("/node_modules/")) throw new Error(`Bundled package input: ${normalized}`);
+        if (
+          normalized.includes("/node_modules/") &&
+          !allowedBundledPackages.some((dependency) => normalized.includes(`/node_modules/${dependency}/`))
+        ) {
+          throw new Error(`Bundled package input: ${normalized}`);
+        }
       }
     }
     const eagerOutputs = collectEagerOutputs(outputs, entryPaths.index);
@@ -197,6 +204,7 @@ export function createRuntimeBuilder({
         outExtension: { ".js": ".ts" },
         outdir: stagingDirectory,
         packages: "external",
+        plugins,
         platform: "node",
         sourcemap: true,
         splitting: true,

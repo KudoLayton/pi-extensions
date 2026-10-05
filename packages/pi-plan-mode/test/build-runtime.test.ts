@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DefaultResourceLoader, ExtensionRunner, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { createRpcHarness } from "@narumitw/pi-tui-kit/testing";
+import { createRpcHarness, createTuiHarness } from "@narumitw/pi-tui-kit/testing";
 import { test } from "vitest";
 import { listFiles, registerRuntimeBuilderContract } from "../../../test/runtime-builder-contract.js";
 import { builtinTool, createMockContext, extensionTool } from "../../../test/support.js";
@@ -21,9 +21,10 @@ const { packageRoot, loadBuilder } = registerRuntimeBuilderContract({
     "src/settings-menu.ts",
   ],
   forbiddenEagerExternals: ["@narumitw/pi-tui-kit"],
+  allowedBundledPackages: ["@narumitw/pi-tui-kit"],
 });
 
-test("generated interactive UI stays loadable with a lazy external questionnaire", async () => {
+test("generated interactive UI bundles the questionnaire into lazy TS chunks", async () => {
   const builder = await loadBuilder();
   const root = await mkdtemp(join(packageRoot, ".pi-plan-mode-build-test-"));
   try {
@@ -40,14 +41,18 @@ test("generated interactive UI stays loadable with a lazy external questionnaire
     const kitImports = Object.values(metadata.outputs ?? {})
       .flatMap((chunk) => chunk.imports ?? [])
       .filter((imported) => imported.path === "@narumitw/pi-tui-kit");
-    assert.ok(kitImports.length > 0, "generated runtime must import Pi TUI Kit");
+    assert.deepEqual(kitImports, [], "Pi TUI Kit must not escape to native JS imports");
     assert.ok(
-      kitImports.every((imported) => imported.external),
-      "Pi TUI Kit must remain external",
+      Object.values(metadata.outputs ?? {}).some((chunk) =>
+        Object.keys(chunk.inputs ?? {}).some((input) => input.endsWith("components/questionnaire.js")),
+      ),
+      "the runtime must contain the bundled questionnaire component",
     );
     assert.ok(
-      kitImports.some((imported) => imported.kind === "dynamic-import"),
-      "the questionnaire runner must remain a first-use import",
+      Object.values(metadata.outputs ?? {})
+        .flatMap((chunk) => chunk.imports ?? [])
+        .some((imported) => imported.kind === "dynamic-import" && !imported.external && imported.path.endsWith(".ts")),
+      "questionnaire first-use imports must remain inside the TS loader",
     );
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -157,9 +162,46 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
     ]);
     runner.setUIContext((mockContext.ctx as { ui: never }).ui, "tui");
     await command.handler("start", runner.createCommandContext());
+    const signal = new AbortController().signal;
+    const question = runner.getToolDefinition("plan_mode_question");
+    assert.ok(question);
+    const tui = createTuiHarness({ width: 40, rows: 30 });
+    const questionContext = createMockContext({
+      mode: "tui",
+      hasUI: true,
+      cwd: root,
+      sessionManager,
+      custom: tui.custom,
+    });
+    runner.setUIContext((questionContext.ctx as { ui: never }).ui, "tui");
+    const pendingQuestion = question.execute(
+      "question-generated-plan",
+      {
+        questions: [
+          {
+            id: "scope",
+            header: "Scope",
+            question: "Which scope?",
+            options: [
+              { label: "Focused", description: "Only the fix." },
+              { label: "Broad", description: "Include cleanup." },
+            ],
+          },
+        ],
+      },
+      signal,
+      undefined,
+      runner.createToolContext("question-generated-plan", signal),
+    );
+    await tui.waitForOpen();
+    tui.press("tui.select.confirm");
+    tui.press("tui.select.confirm");
+    const questionResult = await pendingQuestion;
+    assert.equal((questionResult.details as { cancelled?: boolean }).cancelled, false);
+    assert.equal((questionResult.details as { answers?: { answer: string }[] }).answers?.[0]?.answer, "Focused");
+    runner.setUIContext((mockContext.ctx as { ui: never }).ui, "tui");
     const complete = runner.getToolDefinition("plan_mode_complete");
     assert.ok(complete);
-    const signal = new AbortController().signal;
     await complete.execute(
       "complete-generated-plan",
       { plan: "# Plan\n\nImplement the generated-runtime fix." },

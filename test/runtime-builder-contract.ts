@@ -36,6 +36,7 @@ interface RuntimeBuilderContractOptions {
   forbiddenEagerInputs?: readonly string[];
   forbiddenEagerExternals?: readonly string[];
   allowedEagerExternals?: readonly string[];
+  allowedBundledPackages?: readonly string[];
   matchExternalSubpaths?: boolean;
   includeDynamicExternals?: boolean;
   entries?: Record<string, string>;
@@ -91,6 +92,13 @@ export function registerRuntimeBuilderContract(options: RuntimeBuilderContractOp
       const metadata = validMetadata();
       requireOutput(metadata, "dist/index.ts").imports?.push({ path, kind: "import-statement", external: true });
       assert.doesNotThrow(() => builder.validateEagerGraph(metadata));
+    }
+    for (const dependency of options.allowedBundledPackages ?? []) {
+      const metadata = validMetadata();
+      requireOutput(metadata, "dist/index.ts").inputs = { [`node_modules/${dependency}/dist/index.js`]: {} };
+      assert.doesNotThrow(() => builder.validateEagerGraph(metadata));
+      requireOutput(metadata, "dist/index.ts").inputs = { [`node_modules/${dependency}-other/index.js`]: {} };
+      assert.throws(() => builder.validateEagerGraph(metadata), /Bundled package input/u);
     }
     for (const path of ["dist/index.ts", "dist/chunks/dependency.ts"]) {
       const metadata = validMetadata();
@@ -168,7 +176,14 @@ export function registerRuntimeBuilderContract(options: RuntimeBuilderContractOp
       assert.ok(externalImports.length > 0, "generated extension must retain external package imports");
       for (const imported of externalImports) assert.equal(imported.external, true, imported.path);
       for (const output of Object.values(outputs)) {
-        for (const input of Object.keys(output.inputs ?? {})) assert.equal(input.includes("node_modules/"), false);
+        for (const input of Object.keys(output.inputs ?? {})) {
+          const normalized = input.replaceAll("\\", "/");
+          if (!normalized.includes("node_modules/")) continue;
+          assert.ok(
+            options.allowedBundledPackages?.some((dependency) => normalized.includes(`node_modules/${dependency}/`)),
+            `unreviewed bundled package input: ${input}`,
+          );
+        }
       }
       assert.deepEqual((await readdir(root)).sort(), ["first", "second"]);
     } finally {
